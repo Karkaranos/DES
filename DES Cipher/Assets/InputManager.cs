@@ -4,14 +4,16 @@ using UnityEngine;
 using TMPro;
 using Unity.VisualScripting;
 using System.Linq;
+using System;
+using UnityEngine.InputSystem.DualShock.LowLevel;
 
 public class InputManager : MonoBehaviour
 {
     private string plaintext;
     private string key;
-    private string rawKeyBinary;
+    private int[] rawKeyBinary;
     private int[] permutatedBinaryKey;
-    private int[,] keys;
+    [SerializeField] private int[][] keys = new int[16][];
 
     [SerializeField] private TMP_Text keyField;
     [SerializeField] private TMP_Text plaintextField;
@@ -340,6 +342,41 @@ public class InputManager : MonoBehaviour
         {62,15},
         {63,7}
     };
+    Dictionary<int, int> E = new Dictionary<int, int>
+    {
+        {0,248},
+        {1,3},
+        {2,4},
+        {3,0507},
+        {4,0608},
+        {5,9},
+        {6,10},
+        {7,1113},
+        {8,1214},
+        {9,15},
+        {10,16},
+        {11,1719},
+        {12,1820},
+        {13,21},
+        {14,22},
+        {15,2325},
+        {16,2426},
+        {17,27},
+        {18,28},
+        {19,2931},
+        {20,3032},
+        {21,33},
+        {22,34},
+        {23,3537},
+        {24,3638},
+        {25,39},
+        {26,40},
+        {27,4143},
+        {28,4244},
+        {29,45},
+        {30,46},
+        {31,147}
+    };
     #endregion
 
     #region S Boxes
@@ -417,24 +454,28 @@ public class InputManager : MonoBehaviour
     private void GenerateKeys()
     {
         permutatedBinaryKey = new int[56];
-        keys = new int[16,8];
+        keys = new int[16][];
         if (key.Length > 8)
             key = key.Substring(0, 8);
 
         Debug.Log(key);
-        rawKeyBinary = "";
+        rawKeyBinary = new int[64];
 
 
-        for(int i=7; i>=0; i--)
+        for (int i = 7; i >=0; i--)
         {
-            rawKeyBinary = CharAsBinary(key.Substring(i, 1)) + rawKeyBinary;
+            var result = CharAsBinary(key.Substring(i, 1));
+            for (int j = 0; j < 8; j++)
+            {
+                rawKeyBinary[(8 * i) + j] = result[j];
+            }
         }
-        Debug.Log(rawKeyBinary);
+        //Debug.Log(rawKeyBinary);
 
         int[] removedParity = new int[56];
-        for(int i=0, j=0; i<64; i++)
+        for (int i = 0, j = 0; i < 64; i++)
         {
-            if((i+1)%8 == 0)
+            if ((i + 1) % 8 == 0)
             {
                 continue;
             }
@@ -443,26 +484,111 @@ public class InputManager : MonoBehaviour
         }
 
         KeyPC1(removedParity);
+
+        int[] CStart = new int[28];
+        int[] DStart = new int[28];
+
+        for (int i = 0; i < 28; i++)
+        {
+            CStart[i] = permutatedBinaryKey[i];
+        }
+        for (int i = 0, j = 28; i < 28 && j < 56; i++, j++)
+        {
+            DStart[i] = permutatedBinaryKey[j];
+        }
+
+        int[] CEnd = new int[28];
+        int[] DEnd = new int[28];
+
+
+        Array.Copy(CStart, CEnd, 28);
+        Array.Copy(DStart, DEnd, 28);
+
+        for (int i = 1; i <= 2; i++)
+        {
+            if (i == 1 || i == 2 || i == 9 || i==16)
+            {
+                CEnd = LeftShiftN(CStart, 2);
+                DEnd = LeftShiftN(DStart, 2);
+            }
+            else
+            {
+                CEnd = LeftShiftN(CStart, 1);
+                DEnd = LeftShiftN(DStart, 1);
+            }
+
+            CStart = CEnd;
+            DStart = DEnd;
+
+            int[] cocenatedVals = new int[56];
+            cocenatedVals = CocenateArrays(CEnd, DEnd);
+
+            keys[i] = cocenatedVals;
+
+            
+
+        }
     }
 
 
-    private string CharAsBinary(string c)
+    private int[] CharAsBinary(string c)
     {
-        string res = "";
+        int[] res = new int[8];
         int value = ASCIIVals[c];
         for(int i=7; i>=0; i--)
         {
             if(value >= (int)Mathf.Pow(2,i))
             {
                 value -= (int)Mathf.Pow(2, i);
-                res += "1";
+                res[i] = 1;
             }
             else
             {
-                res += "0";
+                res[i] = 0;
             }
         }
         return res;
+    }
+
+    private int[] LeftShiftN(int[] start, int shift)
+    {
+        int[] result = new int[start.Length];
+        int startingIndex = shift;
+        int endingIndex = start.Length - shift;
+
+        if(shift ==1)
+        {
+            result[result.Length - 1] = start[0];
+        }
+        else if(shift == 2)
+        {
+            result[result.Length - 2] = start[0];
+            result[result.Length - 1] = start[1];
+        }
+            for (int i = startingIndex; i < endingIndex; i++)
+            {
+                result[(i-shift)] = start[i];
+            }
+
+        return result;
+    }
+
+
+    private int[] CocenateArrays(int[] c, int[] d)
+    {
+        int[] result = new int[c.Length + d.Length];
+
+        for(int i=0; i<c.Length; i++)
+        {
+            result[i] = c[i];
+        }
+
+        for(int i=0, j=c.Length; j < result.Length && i<d.Length; i++, j++)
+        {
+            result[j] = d[i];
+        }
+
+        return result;
     }
 
     private void KeyPC1(int[] vals)
@@ -477,8 +603,28 @@ public class InputManager : MonoBehaviour
         {
             permutatedBinaryKey[PC1[i]-1] = vals[i];
         }
-
     }
+
+    private int[] KeyPC2(int[] vals)
+    {
+        int[] result = new int[48];
+        if(vals.Length < 56)
+        {
+            Debug.LogWarning("Error! Missing values for Key Permutation 2!");
+
+        }
+        for (int i = 0; i < 56; i++)
+        {
+            int res = PC2[i];
+            if(res < 0)
+            {
+                continue;
+            }
+            result[res - 1] = vals[i];
+        }
+        return result;
+    }
+
 
 
 
